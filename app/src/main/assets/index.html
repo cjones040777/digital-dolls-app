@@ -25,10 +25,7 @@
   #nav-controls {
     display: flex; gap: 8px; align-items: center;
   }
-  /* V10-style: slim top bar, out of the way */
-  #header {
-    padding: 8px 15px;
-  }
+  /* Slim top bar, out of the way */
   #model-dropdown {
     font-size: 12px; padding: 8px 10px;
   }
@@ -57,6 +54,21 @@
     background: rgba(0,0,0,.8); color: #0f0; font-size: 11px; font-family: monospace;
     padding: 8px; border-radius: 6px; max-width: 300px; display: none;
   }
+
+  /* Diamond Pro / Pearl-Ready branding */
+  .diamond-badge {
+    font-size: 9px; letter-spacing: 2px; color: #c9a227;
+    margin-top: 3px; text-transform: uppercase; font-weight: 700;
+  }
+  .diamond-badge .gem { color: #ed1c24; }
+  .slogan { font-size: 8px; letter-spacing: 1px; color: #666; margin-top: 2px; font-style: italic; }
+  #voice-toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,20,28,.95); border: 1px solid #c9a227; color: #eee;
+    padding: 12px 20px; border-radius: 12px; font-size: 13px; z-index: 100;
+    display: none; text-align: center; max-width: 90vw;
+  }
+  #voice-toast .mic { font-size: 20px; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/gaussian-splats-3d@0.4.0/build/gaussian-splats-3d.min.js"></script>
 </head>
@@ -67,13 +79,16 @@
 
 <div id="header">
   <div id="brand">
-    <div class="name">SENOJ <span>MEDIA</span></div>
+    <div class="name">SENOJ <span>MEDIA X</span></div>
     <div class="tier">Obsidian Models</div>
+    <div class="diamond-badge"><span class="gem">\u25C6</span> Diamond Pro \u00B7 Pearl-Ready</div>
+    <div class="slogan">Your story, my story, our stories.</div>
   </div>
   <div id="nav-controls">
     <select id="model-dropdown"></select>
     <button class="btn" id="btn-rotate">Rotate</button>
     <button class="btn" id="btn-nude">Nude</button>
+    <button class="btn" id="btn-voice" title="Voice interface (Diamond Pro)">\uD83C\uDFA9 Voice</button>
   </div>
 </div>
 
@@ -443,9 +458,7 @@ document.getElementById('btn-nude').addEventListener('click', function() {
   setModel(currentId);
   log(nudeMode ? 'Nude mode ON' : 'Clothed mode');
 });
-// Debug removed - document.getElementById('btn-debug').addEventListener('click', () => {
-  debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
-});
+// Debug panel hidden by default
 
 // Touch rotate
 let lastX = 0, dragging = false;
@@ -476,6 +489,21 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+</script>
+<script>
+// Diamond Pro voice placeholder
+(function(){
+  var toast = document.createElement('div');
+  toast.id = 'voice-toast';
+  toast.innerHTML = '<div class="mic">\uD83C\uDFA9</div><div><b>Voice interface</b> \u2014 coming soon on Diamond Pro.<br><span style="color:#c9a227">Talk to your doll. She will answer.</span></div>';
+  document.body.appendChild(toast);
+  var vb = document.getElementById('btn-voice');
+  if (vb) vb.addEventListener('click', function(){
+    toast.style.display = 'block';
+    clearTimeout(window.__vt);
+    window.__vt = setTimeout(function(){ toast.style.display = 'none'; }, 3500);
+  });
+})();
 </script>
 </body>
 </html>
