@@ -1,0 +1,36 @@
+plugins {
+    id("com.android.application")
+}
+
+android {
+    namespace = "com.senojmediax.corporate"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.senojmediax.corporate"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            storeFile = file("/home/hatch/workspace/zau/apks/senoj-release.keystore")
+            storePassword = System.getenv("SENOJ_KEYSTORE_PASSWORD")
+            keyAlias = "senoj"
+            keyPassword = System.getenv("SENOJ_KEYSTORE_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.release
+            minifyEnabled = false
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}

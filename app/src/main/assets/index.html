@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SENOJ Media X - Obsidian Models</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #eee; font-family: -apple-system, sans-serif; overflow: hidden; }
+  #canvas-container { position: fixed; top: 60px; left: 0; right: 0; bottom: 0; }
+  /* Starts below nav - nav is out of the way, not overlapping */
+  canvas { display: block; }
+  
+  #header {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 14px 20px; display: flex; justify-content: space-between; align-items: center;
+    background: linear-gradient(to bottom, rgba(10,10,15,.9), transparent);
+    z-index: 10; pointer-events: none;
+  }
+  #header > * { pointer-events: auto; }
+  #brand .name { font-size: 15px; font-weight: 700; letter-spacing: 3px; }
+  #brand .name span { color: #c9a227; }
+  #brand .tier { font-size: 11px; color: #888; letter-spacing: 2px; }
+  
+  #nav-controls {
+    display: flex; gap: 8px; align-items: center;
+  }
+  /* V10-style: slim top bar, out of the way */
+  #header {
+    padding: 8px 15px;
+  }
+  #model-dropdown {
+    font-size: 12px; padding: 8px 10px;
+  }
+  .btn {
+    font-size: 11px; padding: 8px 12px;
+  }
+  #model-dropdown {
+    background: rgba(20,20,28,.95); color: #c9a227;
+    border: 1px solid rgba(201,162,39,.6); border-radius: 10px;
+    font-size: 14px; font-weight: 700; padding: 12px 16px;
+    text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
+    max-width: 50vw;
+  }
+  #model-dropdown option { background: #14141c; color: #eee; }
+  
+  .btn {
+    background: rgba(20,20,28,.95); color: #aaa;
+    border: 1px solid rgba(201,162,39,.35); border-radius: 10px;
+    font-size: 12px; padding: 12px 16px; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+  }
+  .btn:active { background: rgba(201,162,39,.2); color: #fff; }
+  
+  #debug {
+    position: fixed; top: 70px; left: 10px; z-index: 20;
+    background: rgba(0,0,0,.8); color: #0f0; font-size: 11px; font-family: monospace;
+    padding: 8px; border-radius: 6px; max-width: 300px; display: none;
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/gaussian-splats-3d@0.4.0/build/gaussian-splats-3d.min.js"></script>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="splat-container" style="position: fixed; top: 60px; left: 0; right: 0; bottom: 0; display: none;"></div>
+<div id="splat-loading" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; display: none; background: rgba(0,0,0,0.8); color: #c9a227; padding: 20px 30px; border-radius: 10px; font-size: 14px;">Loading 3D scan...</div>
+
+<div id="header">
+  <div id="brand">
+    <div class="name">SENOJ <span>MEDIA</span></div>
+    <div class="tier">Obsidian Models</div>
+  </div>
+  <div id="nav-controls">
+    <select id="model-dropdown"></select>
+    <button class="btn" id="btn-rotate">Rotate</button>
+    <button class="btn" id="btn-nude">Nude</button>
+  </div>
+</div>
+
+<div id="debug"></div>
+
+<script type="importmap">
+{ "imports": { 
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const debugEl = document.getElementById('debug');
+function log(msg) {
+  console.log(msg);
+  debugEl.innerHTML += msg + '<br>';
+}
+
+// ============ MODELS ============
+const MODELS = [
+  { id: 'dustin', name: 'Dustin', tex: 'textures/dustin-head-256.png', splat: 'models/dustin-triposplat.ply' },
+  { id: 'brad', name: 'Brad', tex: 'textures/brad-head-256.png', body: 'brad_ref', splat: 'models/brad-triposplat.ply', glb: 'models/brad-trellis.glb' },
+  { id: 'trioA', name: 'Trio A', tex: 'textures/trio-a-head-256.png' },
+  { id: 'trioB', name: 'Trio B', tex: 'textures/trio-b-head-256.png' },
+  { id: 'trioC', name: 'Trio C', tex: 'textures/trio-c-head-256.png' },
+  { id: 'nate', name: 'Nate', tex: 'textures/nate-head-256.png' },
+  { id: 'damico', name: "D'Amico", tex: 'textures/damico-head-256.png' },
+  { id: 'coriel', name: 'Coriel', tex: 'textures/coriel-head-256.png' },
+  { id: 'eddie', name: 'Eddie', tex: 'textures/eddie-head-256.png' },
+  { id: 'tim', name: 'Tim', tex: 'textures/tim-head-256.png' },
+];
+
+// ============ SCENE ============
+log('Creating scene...');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0f);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 1.6, 4);
+camera.lookAt(0, 1.2, 0);
+log('Camera created');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+log('Renderer created');
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(2, 4, 3);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x8888ff, 0.4);
+fill.position.set(-2, 2, 2);
+scene.add(fill);
+log('Lights added');
+
+// ============ BUILD HUMANOID ============
+let currentGroup = null;
+let autoRotate = false;
+let nudeMode = false;
+
+function buildHumanoid(model) {
+  log('Building ' + model.name + '...');
+  const g = new THREE.Group();
+  
+  const skinMat = new THREE.MeshStandardMaterial({ 
+    color: 0xc9a080, roughness: 0.55, metalness: 0.05 
+  });
+  const shirtMat = new THREE.MeshStandardMaterial({ 
+    color: 0x1a1a2e, roughness: 0.7, metalness: 0.1 
+  });
+  const pantsMat = new THREE.MeshStandardMaterial({ 
+    color: 0x0f0f1a, roughness: 0.7, metalness: 0.1 
+  });
+  
+  // Head - higher detail sphere, slightly elongated
+  const headGeo = new THREE.SphereGeometry(0.22, 48, 48);
+  headGeo.scale(0.92, 1.08, 0.98);
+  const head = new THREE.Mesh(headGeo, skinMat.clone());
+  head.position.y = 1.75;
+  head.userData.isHead = true;
+  g.add(head);
+  
+  // Neck - tapered
+  const neckPts = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    neckPts.push(new THREE.Vector2(0.075 - t * 0.01, t * 0.14));
+  }
+  const neck = new THREE.Mesh(new THREE.LatheGeometry(neckPts, 24), skinMat);
+  neck.position.y = 1.48;
+  g.add(neck);
+  
+  // Torso - organic lathe (shoulders to waist)
+  const torsoPts = [];
+  // Body profiles per model - Brad matches anatomical reference
+  const isBrad = model.body === 'brad_ref';
+  const torsoProfile = isBrad ? [
+    // Brad: average build, natural proportions from reference photo
+    [0.02, 0.00], [0.135, 0.02], [0.175, 0.10], [0.190, 0.22],
+    [0.185, 0.35], [0.175, 0.48], [0.165, 0.58], [0.155, 0.65]
+  ] : [
+    [0.02, 0.00], [0.14, 0.02], [0.185, 0.10], [0.20, 0.22],
+    [0.195, 0.35], [0.175, 0.48], [0.155, 0.58], [0.145, 0.65]
+  ];
+  torsoProfile.forEach(([r, y]) => torsoPts.push(new THREE.Vector2(r, y)));
+  const torso = new THREE.Mesh(new THREE.LatheGeometry(torsoPts, 32), nudeMode ? skinMat : shirtMat);
+  torso.position.y = 0.82;
+  torso.scale.z = 0.72; // Flatten front-to-back for realistic torso
+  g.add(torso);
+  
+  // Anatomical features (nude mode only)
+  if (nudeMode) {
+    // Male genitalia - anatomically proportioned
+    const genGroup = new THREE.Group();
+    
+    // Shaft
+    const shaftGeo = new THREE.CylinderGeometry(0.022, 0.026, 0.11, 16);
+    const shaft = new THREE.Mesh(shaftGeo, skinMat);
+    shaft.position.set(0, -0.02, 0.145);
+    shaft.rotation.x = 0.35;
+    genGroup.add(shaft);
+    
+    // Glans
+    const glansGeo = new THREE.SphereGeometry(0.028, 16, 16);
+    glansGeo.scale(1, 1.25, 1);
+    const glans = new THREE.Mesh(glansGeo, skinMat);
+    glans.position.set(0, -0.055, 0.165);
+    genGroup.add(glans);
+    
+    // Scrotum
+    const scrotGeo = new THREE.SphereGeometry(0.045, 16, 16);
+    scrotGeo.scale(1, 1.15, 0.9);
+    const scrotum = new THREE.Mesh(scrotGeo, skinMat);
+    scrotum.position.set(0, -0.06, 0.10);
+    genGroup.add(scrotum);
+    
+    genGroup.position.y = 0.82; // At hip level
+    g.add(genGroup);
+    
+    // Nipples
+    for (const side of [-1, 1]) {
+      const nipGeo = new THREE.SphereGeometry(0.018, 12, 12);
+      nipGeo.scale(1, 0.6, 0.6);
+      const nip = new THREE.Mesh(nipGeo, new THREE.MeshStandardMaterial({ 
+        color: 0xa07050, roughness: 0.6 
+      }));
+      nip.position.set(side * 0.085, 1.28, 0.145);
+      g.add(nip);
+    }
+  }
+  
+  // Arms - tapered lathe
+  for (const side of [-1, 1]) {
+    const armPts = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      // Shoulder -> elbow -> wrist taper
+      const r = 0.062 - t * 0.022 + Math.sin(t * Math.PI) * 0.008;
+      armPts.push(new THREE.Vector2(Math.max(r, 0.035), t * 0.62));
+    }
+    const arm = new THREE.Mesh(new THREE.LatheGeometry(armPts, 20), nudeMode ? skinMat : shirtMat);
+    arm.position.set(side * 0.26, 0.82, 0);
+    arm.rotation.z = side * -0.12;
+    // Bend slightly at elbow
+    g.add(arm);
+    
+    // Hand - rounded box
+    const handGeo = new THREE.SphereGeometry(0.065, 20, 20);
+    handGeo.scale(0.8, 1.3, 0.9);
+    const hand = new THREE.Mesh(handGeo, skinMat);
+    hand.position.set(side * 0.33, 0.78, 0);
+    g.add(hand);
+  }
+  
+  // Legs - organic taper (thigh to ankle)
+  for (const side of [-1, 1]) {
+    const legPts = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      // Thigh -> knee -> calf -> ankle
+      let r = 0.095 - t * 0.045;
+      r += Math.sin(t * Math.PI * 1.2) * 0.012; // Calf bulge
+      legPts.push(new THREE.Vector2(Math.max(r, 0.038), t * 0.82));
+    }
+    const leg = new THREE.Mesh(new THREE.LatheGeometry(legPts, 24), nudeMode ? skinMat : pantsMat);
+    leg.position.set(side * 0.11, 0.02, 0);
+    // Flip so wide end is at top
+    leg.rotation.x = Math.PI;
+    leg.position.y = 0.84;
+    g.add(leg);
+    
+    // Foot - organic shape
+    const footGeo = new THREE.SphereGeometry(0.09, 20, 20);
+    footGeo.scale(0.85, 0.55, 1.6);
+    const foot = new THREE.Mesh(footGeo, nudeMode ? skinMat : pantsMat);
+    foot.position.set(side * 0.11, 0.045, 0.08);
+    g.add(foot);
+  }
+  
+  // Apply photo texture to head
+  if (model.tex) {
+    new THREE.TextureLoader().load(
+      model.tex,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        head.material = new THREE.MeshStandardMaterial({
+          map: tex, roughness: 0.6,
+          emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.25
+        });
+        log('Photo applied: ' + model.name);
+      },
+      undefined,
+      (err) => { log('Texture failed (using skin): ' + model.tex); }
+    );
+  }
+  
+  log('Model built: ' + model.name);
+  return g;
+}
+
+const gltfLoader = new GLTFLoader();
+const glbCache = {};
+
+// ============ GAUSSIAN SPLAT VIEWER ============
+let splatViewer = null;
+let currentSplatUrl = null;
+
+function showSplat(plyUrl, modelName) {
+  const splatContainer = document.getElementById('splat-container');
+  const canvasContainer = document.getElementById('canvas-container');
+  const loadingEl = document.getElementById('splat-loading');
+  
+  // Hide Three.js canvas, show splat container
+  canvasContainer.style.display = 'none';
+  splatContainer.style.display = 'block';
+  splatContainer.innerHTML = '';
+  loadingEl.style.display = 'block';
+  loadingEl.textContent = 'Loading ' + modelName + ' 3D scan...';
+  
+  try {
+    // GaussianSplats3D is loaded via CDN script tag
+    if (typeof GaussianSplats3D === 'undefined') {
+      throw new Error('Splat library not loaded');
+    }
+    
+    splatViewer = new GaussianSplats3D.Viewer({
+      'cameraUp': [0, 1, 0],
+      'initialCameraPosition': [0, 1.5, 4],
+      'initialCameraLookAt': [0, 1.0, 0],
+      'rootElement': splatContainer
+    });
+    
+    currentSplatUrl = plyUrl;
+    splatViewer.addSplatScene(plyUrl, {
+      'showLoadingUI': false,
+      'progressiveLoad': true
+    }).then(() => {
+      loadingEl.style.display = 'none';
+      log(modelName + ': 3D scan loaded');
+      splatViewer.start();
+    }).catch((err) => {
+      console.error('Splat load failed:', err);
+      loadingEl.textContent = '3D scan failed to load';
+      log(modelName + ': Splat failed, falling back');
+      setTimeout(() => hideSplat(), 2000);
+    });
+    
+  } catch (err) {
+    console.error('Splat viewer error:', err);
+    hideSplat();
+  }
+}
+
+function hideSplat() {
+  const splatContainer = document.getElementById('splat-container');
+  const canvasContainer = document.getElementById('canvas-container');
+  const loadingEl = document.getElementById('splat-loading');
+  
+  if (splatViewer) {
+    try { splatViewer.dispose(); } catch(e) {}
+    splatViewer = null;
+  }
+  currentSplatUrl = null;
+  splatContainer.style.display = 'none';
+  splatContainer.innerHTML = '';
+  loadingEl.style.display = 'none';
+  canvasContainer.style.display = 'block';
+}
+
+function setModel(id) {
+  const model = MODELS.find(m => m.id === id) || MODELS[0];
+  
+  // Always hide splat first when switching
+  hideSplat();
+  if (currentGroup) scene.remove(currentGroup);
+  
+  // Priority 1: Use Gaussian splat if available (real 3D scan)
+  if (model.splat && !nudeMode) {
+    log('Loading 3D scan for ' + model.name + '...');
+    // Show procedural as fallback while splat loads in separate viewer
+    currentGroup = buildHumanoid(model);
+    scene.add(currentGroup);
+    // Try to show the splat (will hide canvas if successful)
+    showSplat(model.splat, model.name);
+    document.getElementById('model-dropdown').value = id;
+    log('Switched to: ' + model.name + ' (3D scan)');
+    return;
+  }
+  
+  // Priority 2: Use real 3D GLB for Brad if available
+  if (id === 'brad' && model.glb && !nudeMode) {
+    gltfLoader.load(model.glb,
+      (gltf) => {
+        if (currentGroup) scene.remove(currentGroup);
+        currentGroup = gltf.scene;
+        currentGroup.scale.set(1, 1, 1);
+        currentGroup.position.y = 0;
+        scene.add(currentGroup);
+        log('Brad: Real 3D model loaded');
+      },
+      undefined,
+      (err) => {
+        console.error('GLB failed, using procedural:', err);
+        currentGroup = buildHumanoid(model);
+        scene.add(currentGroup);
+      }
+    );
+    // Show procedural while loading
+    currentGroup = buildHumanoid(model);
+  } else {
+    currentGroup = buildHumanoid(model);
+  }
+  
+  scene.add(currentGroup);
+  document.getElementById('model-dropdown').value = id;
+  log('Switched to: ' + model.name);
+}
+
+// ============ DROPDOWN ============
+const dd = document.getElementById('model-dropdown');
+MODELS.forEach(m => {
+  const o = document.createElement('option');
+  o.value = m.id;
+  o.textContent = m.name;
+  dd.appendChild(o);
+});
+dd.addEventListener('change', () => setModel(dd.value));
+log('Dropdown populated: ' + MODELS.length + ' models');
+
+// ============ CONTROLS ============
+document.getElementById('btn-rotate').addEventListener('click', function() {
+  autoRotate = !autoRotate;
+  this.textContent = autoRotate ? 'Stop' : 'Rotate';
+});
+document.getElementById('btn-nude').addEventListener('click', function() {
+  nudeMode = !nudeMode;
+  this.textContent = nudeMode ? 'Clothed' : 'Nude';
+  this.style.borderColor = nudeMode ? '#ff6b6b' : '';
+  const currentId = document.getElementById('model-dropdown').value;
+  setModel(currentId);
+  log(nudeMode ? 'Nude mode ON' : 'Clothed mode');
+});
+// Debug removed - document.getElementById('btn-debug').addEventListener('click', () => {
+  debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
+});
+
+// Touch rotate
+let lastX = 0, dragging = false;
+renderer.domElement.addEventListener('touchstart', e => { dragging = true; lastX = e.touches[0].clientX; }, {passive:true});
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!dragging || !currentGroup) return;
+  const dx = e.touches[0].clientX - lastX;
+  currentGroup.rotation.y += dx * 0.01;
+  lastX = e.touches[0].clientX;
+}, {passive:true});
+renderer.domElement.addEventListener('touchend', () => dragging = false);
+
+// ============ INIT ============
+setModel('dustin');
+log('Init complete');
+
+// ============ RENDER LOOP ============
+function animate() {
+  requestAnimationFrame(animate);
+  if (autoRotate && currentGroup) currentGroup.rotation.y += 0.01;
+  renderer.render(scene, camera);
+}
+animate();
+log('Render loop started');
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

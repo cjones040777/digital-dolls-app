@@ -1,0 +1,2 @@
+/home/hatch/workspace/zau/apks/webview/digitaldolls/app/src/main/java/com/senojmediax/digitaldolls/MainActivity.java
+/home/hatch/workspace/zau/apks/webview/digitaldolls/build/gen/com/senojmediax/digitaldolls/R.java
