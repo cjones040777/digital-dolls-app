@@ -70,13 +70,16 @@
   }
   #voice-toast .mic { font-size: 20px; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/gaussian-splats-3d@0.4.0/build/gaussian-splats-3d.min.js"></script>
+<style>
+  #action-bar { position: fixed; left: 0; right: 0; bottom: 64px; z-index: 15; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; padding: 0 8px; }
+  #cmd-bar { position: fixed; left: 0; right: 0; bottom: 12px; z-index: 15; display: flex; gap: 6px; justify-content: center; align-items: center; padding: 0 10px; }
+  #cmd-input { flex: 1; max-width: 520px; background: rgba(20,20,28,.95); color: #eee; border: 1px solid rgba(201,162,39,.5); border-radius: 10px; font-size: 14px; padding: 12px 14px; }
+  #cmd-input::placeholder { color: #777; }
+</style>
+<script src="interaction.js"></script>
 </head>
 <body>
 <div id="canvas-container"></div>
-<div id="splat-container" style="position: fixed; top: 60px; left: 0; right: 0; bottom: 0; display: none;"></div>
-<div id="splat-loading" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; display: none; background: rgba(0,0,0,0.8); color: #c9a227; padding: 20px 30px; border-radius: 10px; font-size: 14px;">Loading 3D scan...</div>
-
 <div id="header">
   <div id="brand">
     <div class="name">SENOJ <span>MEDIA X</span></div>
@@ -93,6 +96,21 @@
 </div>
 
 <div id="debug"></div>
+<div id="action-bar">
+  <button class="btn act" data-act="wave">Wave</button>
+  <button class="btn act" data-act="turn">Turn</button>
+  <button class="btn act" data-act="dance">Dance</button>
+  <button class="btn act" data-act="pose">Pose</button>
+  <button class="btn act" data-act="walk">Walk</button>
+  <button class="btn act" data-act="come">Come here</button>
+  <button class="btn act" data-act="idle">Idle</button>
+</div>
+<div id="cmd-bar">
+  <input id="cmd-input" type="text" placeholder="Direct your doll: wave, dance, turn around, pose, walk, come here">
+  <button class="btn" id="cmd-go">Go</button>
+  <button class="btn" id="cmd-mic" title="Voice direction">\U0001F3A4</button>
+</div>
+<div id="voice-toast"></div>
 
 <script type="importmap">
 { "imports": { 
@@ -113,8 +131,8 @@ function log(msg) {
 
 // ============ MODELS ============
 const MODELS = [
-  { id: 'dustin', name: 'Dustin', tex: 'textures/dustin-head-256.png', splat: 'models/dustin-triposplat.ply' },
-  { id: 'brad', name: 'Brad', tex: 'textures/brad-head-256.png', body: 'brad_ref', splat: 'models/brad-triposplat.ply', glb: 'models/brad-trellis.glb' },
+  { id: 'dustin', name: 'Dustin', tex: 'textures/dustin-head-256.png' },
+  { id: 'brad', name: 'Brad', tex: 'textures/brad-head-256.png', body: 'brad_ref', glb: 'models/brad-trellis.glb' },
   { id: 'trioA', name: 'Trio A', tex: 'textures/trio-a-head-256.png' },
   { id: 'trioB', name: 'Trio B', tex: 'textures/trio-b-head-256.png' },
   { id: 'trioC', name: 'Trio C', tex: 'textures/trio-c-head-256.png' },
@@ -319,120 +337,100 @@ function buildHumanoid(model) {
 const gltfLoader = new GLTFLoader();
 const glbCache = {};
 
-// ============ GAUSSIAN SPLAT VIEWER ============
-let splatViewer = null;
-let currentSplatUrl = null;
+// ============ MODEL LOADING — MESH ONLY ============
+// Corey ruling 2026-10-20: splats are OUT of the product entirely (not a
+// fallback, not a second view). The doll is a rigged mesh + baked photo skin.
+// Models without a finished rigged mesh show the labeled placeholder only
+// until their pipeline output lands. See REALISM-REBUILD.md.
+let dollController = null;
 
-function showSplat(plyUrl, modelName) {
-  const splatContainer = document.getElementById('splat-container');
-  const canvasContainer = document.getElementById('canvas-container');
-  const loadingEl = document.getElementById('splat-loading');
-  
-  // Hide Three.js canvas, show splat container
-  canvasContainer.style.display = 'none';
-  splatContainer.style.display = 'block';
-  splatContainer.innerHTML = '';
-  loadingEl.style.display = 'block';
-  loadingEl.textContent = 'Loading ' + modelName + ' 3D scan...';
-  
-  try {
-    // GaussianSplats3D is loaded via CDN script tag
-    if (typeof GaussianSplats3D === 'undefined') {
-      throw new Error('Splat library not loaded');
-    }
-    
-    splatViewer = new GaussianSplats3D.Viewer({
-      'cameraUp': [0, 1, 0],
-      'initialCameraPosition': [0, 1.5, 4],
-      'initialCameraLookAt': [0, 1.0, 0],
-      'rootElement': splatContainer
-    });
-    
-    currentSplatUrl = plyUrl;
-    splatViewer.addSplatScene(plyUrl, {
-      'showLoadingUI': false,
-      'progressiveLoad': true
-    }).then(() => {
-      loadingEl.style.display = 'none';
-      log(modelName + ': 3D scan loaded');
-      splatViewer.start();
-    }).catch((err) => {
-      console.error('Splat load failed:', err);
-      loadingEl.textContent = '3D scan failed to load';
-      log(modelName + ': Splat failed, falling back');
-      setTimeout(() => hideSplat(), 2000);
-    });
-    
-  } catch (err) {
-    console.error('Splat viewer error:', err);
-    hideSplat();
+function attachInteraction(rootObj, animations) {
+  dollController = null;
+  if (window.DollInteraction) {
+    dollController = window.DollInteraction.createController(THREE, { log: log });
+    dollController.attach(rootObj, animations || []);
   }
-}
-
-function hideSplat() {
-  const splatContainer = document.getElementById('splat-container');
-  const canvasContainer = document.getElementById('canvas-container');
-  const loadingEl = document.getElementById('splat-loading');
-  
-  if (splatViewer) {
-    try { splatViewer.dispose(); } catch(e) {}
-    splatViewer = null;
-  }
-  currentSplatUrl = null;
-  splatContainer.style.display = 'none';
-  splatContainer.innerHTML = '';
-  loadingEl.style.display = 'none';
-  canvasContainer.style.display = 'block';
 }
 
 function setModel(id) {
   const model = MODELS.find(m => m.id === id) || MODELS[0];
-  
-  // Always hide splat first when switching
-  hideSplat();
   if (currentGroup) scene.remove(currentGroup);
-  
-  // Priority 1: Use Gaussian splat if available (real 3D scan)
-  if (model.splat && !nudeMode) {
-    log('Loading 3D scan for ' + model.name + '...');
-    // Show procedural as fallback while splat loads in separate viewer
+  dollController = null;
+
+  if (model.glb && !nudeMode) {
+    // Placeholder while the real mesh loads
     currentGroup = buildHumanoid(model);
     scene.add(currentGroup);
-    // Try to show the splat (will hide canvas if successful)
-    showSplat(model.splat, model.name);
-    document.getElementById('model-dropdown').value = id;
-    log('Switched to: ' + model.name + ' (3D scan)');
-    return;
-  }
-  
-  // Priority 2: Use real 3D GLB for Brad if available
-  if (id === 'brad' && model.glb && !nudeMode) {
     gltfLoader.load(model.glb,
       (gltf) => {
         if (currentGroup) scene.remove(currentGroup);
         currentGroup = gltf.scene;
-        currentGroup.scale.set(1, 1, 1);
-        currentGroup.position.y = 0;
         scene.add(currentGroup);
-        log('Brad: Real 3D model loaded');
+        attachInteraction(currentGroup, gltf.animations);
+        log(model.name + ': mesh loaded');
       },
       undefined,
       (err) => {
-        console.error('GLB failed, using procedural:', err);
-        currentGroup = buildHumanoid(model);
-        scene.add(currentGroup);
+        console.error('GLB failed:', err);
+        log(model.name + ': mesh failed to load, placeholder shown');
+        attachInteraction(currentGroup, []);
       }
     );
-    // Show procedural while loading
-    currentGroup = buildHumanoid(model);
   } else {
     currentGroup = buildHumanoid(model);
+    scene.add(currentGroup);
+    attachInteraction(currentGroup, []);
+    log('Switched to: ' + model.name + ' (placeholder — rigged mesh pending)');
   }
-  
-  scene.add(currentGroup);
   document.getElementById('model-dropdown').value = id;
-  log('Switched to: ' + model.name);
 }
+
+// ============ DIRECTION — touch / text / voice, ONE command set ============
+function showToast(msg) {
+  const t = document.getElementById('voice-toast');
+  t.innerHTML = '<div style="font-size:13px">' + msg + '</div>';
+  t.style.display = 'block';
+  clearTimeout(window.__vt);
+  window.__vt = setTimeout(() => { t.style.display = 'none'; }, 3000);
+}
+
+function dispatchDirection(text) {
+  if (!window.DollInteraction) { log('Interaction layer missing'); return; }
+  const parsed = window.DollInteraction.parseCommand(text);
+  if (!parsed) {
+    showToast('Did not catch that. Try: wave, dance, turn around, pose, walk, come here');
+    log('Command not understood: ' + text);
+    return;
+  }
+  if (dollController) {
+    const ok = dollController.play(parsed.action);
+    log('Direction: ' + parsed.action + (ok ? '' : ' (needs rigged mesh)'));
+    if (!ok) showToast('That action needs the rigged mesh — it lands with the realism rebuild');
+  } else {
+    log('No doll attached yet');
+  }
+}
+
+document.querySelectorAll('#action-bar .act').forEach(b =>
+  b.addEventListener('click', () => dispatchDirection(b.dataset.act)));
+const cmdInput = document.getElementById('cmd-input');
+document.getElementById('cmd-go').addEventListener('click', () => { dispatchDirection(cmdInput.value); cmdInput.value = ''; });
+cmdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { dispatchDirection(cmdInput.value); cmdInput.value = ''; } });
+
+function startMic() {
+  if (!window.DollInteraction) return;
+  window.DollInteraction.startVoice(
+    (transcript) => { cmdInput.value = transcript; dispatchDirection(transcript); },
+    (state) => {
+      if (state === 'listening') showToast('\U0001F3A4 Listening — direct your doll');
+      else if (state === 'unsupported') showToast('Voice input is not supported in this browser/WebView. Type a command instead.');
+      else if (state.indexOf('error') === 0) showToast('Mic: ' + state.slice(6) + ' — type a command instead.');
+    }
+  );
+}
+document.getElementById('cmd-mic').addEventListener('click', startMic);
+const voiceBtn = document.getElementById('btn-voice');
+if (voiceBtn) voiceBtn.addEventListener('click', startMic);
 
 // ============ DROPDOWN ============
 const dd = document.getElementById('model-dropdown');
@@ -472,12 +470,17 @@ renderer.domElement.addEventListener('touchmove', e => {
 renderer.domElement.addEventListener('touchend', () => dragging = false);
 
 // ============ INIT ============
-setModel('dustin');
+// Milestone A (2026-10-20): default to Brad — the only model with a real
+// textured mesh on disk. Replaced by the corpus-baked rigged mesh at milestone B.
+setModel('brad');
 log('Init complete');
 
 // ============ RENDER LOOP ============
+const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (dollController) dollController.update(dt);
   if (autoRotate && currentGroup) currentGroup.rotation.y += 0.01;
   renderer.render(scene, camera);
 }
@@ -489,21 +492,6 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
-</script>
-<script>
-// Diamond Pro voice placeholder
-(function(){
-  var toast = document.createElement('div');
-  toast.id = 'voice-toast';
-  toast.innerHTML = '<div class="mic">\uD83C\uDFA9</div><div><b>Voice interface</b> \u2014 coming soon on Diamond Pro.<br><span style="color:#c9a227">Talk to your doll. She will answer.</span></div>';
-  document.body.appendChild(toast);
-  var vb = document.getElementById('btn-voice');
-  if (vb) vb.addEventListener('click', function(){
-    toast.style.display = 'block';
-    clearTimeout(window.__vt);
-    window.__vt = setTimeout(function(){ toast.style.display = 'none'; }, 3500);
-  });
-})();
 </script>
 </body>
 </html>
